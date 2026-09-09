@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CinemaBooking</RootNamespace>
+  </PropertyGroup>
+
+  <!-- SignalR는 ASP.NET Core에 기본 포함되어 있어 별도 패키지가 필요 없습니다. -->
+
+</Project>

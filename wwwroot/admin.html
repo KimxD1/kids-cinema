@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>관리자 - 꼬마 영화관</title>
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:#0f172a; color:#e2e8f0; padding:24px 12px; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { margin:0 0 16px; font-size:1.6rem; }
+  .card { background:#1e293b; border-radius:14px; padding:18px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:1.05rem; color:#93c5fd; }
+  input { padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:.95rem; }
+  button { padding:10px 14px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:.9rem; }
+  .b1{background:#3b82f6;color:#fff} .b2{background:#f59e0b;color:#000} .b3{background:#ef4444;color:#fff} .b4{background:#10b981;color:#fff} .b5{background:#64748b;color:#fff}
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { padding:8px; border-bottom:1px solid #334155; text-align:left; }
+  .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; max-width:360px; }
+  .seat { aspect-ratio:1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:.8rem; font-weight:bold; color:#0f172a; }
+  .available{background:#4ade80} .held{background:#f87171} .booked{background:#9ca3af}
+  .stat { display:flex; gap:20px; font-size:1rem; }
+  .stat b { font-size:1.5rem; display:block; }
+  #msg { min-height:22px; margin-top:10px; font-weight:bold; }
+  .badge { padding:3px 10px; border-radius:999px; font-size:.8rem; font-weight:bold; }
+  .open{background:#065f46} .closed{background:#7f1d1d}
+  #login { max-width:380px; margin:80px auto; }
+  #panel { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card" id="login">
+    <h1>🔐 선생님 로그인</h1>
+    <div class="row">
+      <input id="pw" type="password" placeholder="관리자 비밀번호" style="flex:1">
+      <button class="b1" id="loginBtn">로그인</button>
+    </div>
+    <div id="loginMsg" style="margin-top:10px;color:#fca5a5"></div>
+  </div>
+
+  <div id="panel">
+    <h1>🎬 꼬마 영화관 관리자 <span class="badge" id="siteBadge"></span></h1>
+
+    <div class="card">
+      <h2>현황</h2>
+      <div class="stat">
+        <div>예매 완료 <b id="cBooked">0</b></div>
+        <div>선택 중 <b id="cHeld">0</b></div>
+        <div>빈 자리 <b id="cAvail">0</b></div>
+        <div>예매 건수 <b id="cBookings">0</b></div>
+      </div>
+      <div class="grid" id="grid" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card">
+      <h2>사이트 관리</h2>
+      <div class="row">
+        <button class="b4" id="openBtn">사이트 열기</button>
+        <button class="b2" id="closeBtn">사이트 닫기 (예매 중단)</button>
+        <button class="b5" id="releaseBtn">선택 중인 좌석 전부 해제</button>
+        <button class="b3" id="resetBtn">⚠ 전체 초기화 (모든 예매 삭제)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>영화 / 상영시간 (비워 두어도 됩니다)</h2>
+      <div class="row">
+        <input id="title" placeholder="영화 제목" style="flex:2">
+        <input id="time" placeholder="상영 시간 (예: 오후 2시)" style="flex:1">
+        <input id="poster" placeholder="포스터 이미지 주소(URL)" style="flex:2">
+        <button class="b1" id="showBtn">저장</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>예매 목록 (슈퍼권한: 예매번호 없이 취소 가능)</h2>
+      <table>
+        <thead><tr><th>예매번호</th><th>이름</th><th>좌석</th><th>시간</th><th></th></tr></thead>
+        <tbody id="bookings"></tbody>
+      </table>
+    </div>
+
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+const conn = new signalR.HubConnectionBuilder().withUrl('/adminhub').withAutomaticReconnect().build();
+const $ = id => document.getElementById(id);
+const say = (m, ok = true) => { $('msg').textContent = m; $('msg').style.color = ok ? '#86efac' : '#fca5a5'; };
+let password = '';
+
+conn.on('AdminRefresh', refresh);
+conn.onreconnected(async () => { if (password) { await conn.invoke('Login', password); refresh(); } });
+
+$('loginBtn').onclick = async () => {
+  password = $('pw').value;
+  const ok = await conn.invoke('Login', password);
+  if (!ok) { $('loginMsg').textContent = '비밀번호가 틀렸습니다.'; password = ''; return; }
+  $('login').style.display = 'none'; $('panel').style.display = 'block';
+  refresh();
+};
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+async function refresh() {
+  const d = await conn.invoke('GetDashboard');
+  const seats = d.seats;
+  $('cBooked').textContent = seats.filter(s => s.status === 'booked').length;
+  $('cHeld').textContent = seats.filter(s => s.status === 'held').length;
+  $('cAvail').textContent = seats.filter(s => s.status === 'available').length;
+  $('cBookings').textContent = d.bookings.length;
+  $('grid').innerHTML = seats.map(s => `<div class="seat ${s.status}">${s.id}</div>`).join('');
+  $('siteBadge').textContent = d.siteOpen ? '운영 중' : '닫힘';
+  $('siteBadge').className = 'badge ' + (d.siteOpen ? 'open' : 'closed');
+  $('title').value = d.show.movieTitle; $('time').value = d.show.showTime; $('poster').value = d.show.posterUrl;
+  $('bookings').innerHTML = d.bookings.length ? d.bookings.map(b =>
+    `<tr><td><b>${b.code}</b></td><td>${b.name}</td><td>${b.seatIds.join(', ')}</td>
+     <td>${new Date(b.createdAt).toLocaleString('ko-KR')}</td>
+     <td><button class="b3" onclick="forceCancel('${b.code}')">취소</button></td></tr>`).join('')
+    : '<tr><td colspan="5" style="opacity:.6">예매가 없습니다</td></tr>';
+}
+
+async function forceCancel(code) {
+  if (!confirm(`예매번호 ${code} 를 취소할까요?`)) return;
+  const r = await conn.invoke('ForceCancel', code);
+  say(r ? `${r.join(', ')} 좌석 예매를 취소했습니다.` : '이미 취소된 예매입니다.', !!r);
+  refresh();
+}
+$('openBtn').onclick = async () => { await conn.invoke('SetSiteOpen', true); say('사이트를 열었습니다.'); };
+$('closeBtn').onclick = async () => { await conn.invoke('SetSiteOpen', false); say('사이트를 닫았습니다. 원생들은 좌석을 선택할 수 없습니다.'); };
+$('releaseBtn').onclick = async () => { const n = await conn.invoke('ReleaseAllHolds'); say(`${n}개 좌석의 선택을 해제했습니다.`); };
+$('resetBtn').onclick = async () => {
+  if (!confirm('모든 예매를 삭제하고 좌석을 처음 상태로 되돌립니다. 정말 진행할까요?')) return;
+  await conn.invoke('ResetAll'); say('전체 초기화 완료.');
+};
+$('showBtn').onclick = async () => { await conn.invoke('SetShow', $('title').value, $('time').value, $('poster').value); say('영화 정보를 저장했습니다.'); };
+
+conn.start().catch(e => { $('loginMsg').textContent = '서버 연결 실패: ' + e; });
+</script>
+</body>
+</html>

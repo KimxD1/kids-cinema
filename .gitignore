@@ -1,0 +1,15 @@
+# 빌드 결과물 (깃허브에 올리지 않음)
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+.idea/
+
+# 예매 데이터 (개인 이름이 들어가므로 올리지 않음)
+Data/
+*.json.tmp
+
+# 비밀 설정
+appsettings.Development.json
+appsettings.Production.json

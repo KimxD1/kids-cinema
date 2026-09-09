@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>꼬마 영화관 예매</title>
+<style>
+  :root { --avail:#4ade80; --mine:#facc15; --other:#f87171; --booked:#9ca3af; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:#1e1b4b; color:#fff; display:flex; flex-direction:column; align-items:center; padding:24px 12px; }
+  h1 { margin:0 0 6px; font-size:2rem; }
+  .sub { opacity:.75; margin-bottom:20px; }
+  .screen { width:min(440px,92vw); height:34px; background:linear-gradient(#e0e7ff,#a5b4fc); color:#1e1b4b; border-radius:0 0 60px 60px; display:flex; align-items:center; justify-content:center; font-weight:bold; margin-bottom:26px; box-shadow:0 12px 30px rgba(165,180,252,.35); }
+  .grid { display:grid; grid-template-columns:32px repeat(6,1fr); gap:10px; width:min(440px,92vw); }
+  .rowlabel { display:flex; align-items:center; justify-content:center; font-weight:bold; opacity:.7; }
+  .seat { aspect-ratio:1; border:none; border-radius:12px 12px 6px 6px; font-size:1rem; font-weight:bold; cursor:pointer; color:#1e1b4b; transition:transform .1s; position:relative; }
+  .seat:active { transform:scale(.93); }
+  .seat.available { background:var(--avail); }
+  .seat.mine { background:var(--mine); box-shadow:0 0 0 3px #fff inset; }
+  .seat.other { background:var(--other); cursor:not-allowed; }
+  .seat.booked { background:var(--booked); cursor:not-allowed; color:#374151; }
+  .seat.other::after { content:"선택중"; position:absolute; bottom:3px; left:0; right:0; font-size:.6rem; font-weight:normal; }
+  .seat.booked::after { content:"예매완료"; position:absolute; bottom:3px; left:0; right:0; font-size:.6rem; font-weight:normal; }
+  .legend { display:flex; gap:14px; margin:20px 0; font-size:.9rem; flex-wrap:wrap; justify-content:center; }
+  .legend span::before { content:""; display:inline-block; width:14px; height:14px; border-radius:4px; margin-right:6px; vertical-align:-2px; }
+  .legend .a::before{background:var(--avail)} .legend .m::before{background:var(--mine)} .legend .o::before{background:var(--other)} .legend .b::before{background:var(--booked)}
+  .panel { background:#312e81; border-radius:16px; padding:18px; width:min(440px,92vw); margin-top:8px; }
+  .panel h2 { margin:0 0 10px; font-size:1.1rem; }
+  .row { display:flex; gap:8px; margin-top:8px; }
+  input { flex:1; padding:12px; border-radius:10px; border:none; font-size:1rem; }
+  button.btn { padding:12px 18px; border:none; border-radius:10px; font-size:1rem; font-weight:bold; cursor:pointer; }
+  .pay { background:#facc15; color:#1e1b4b; } .cancel { background:#f87171; color:#fff; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  #status { margin-top:14px; min-height:24px; font-weight:bold; text-align:center; }
+  .conn { position:fixed; top:10px; right:12px; font-size:.75rem; padding:4px 10px; border-radius:999px; background:#0f766e; }
+  .conn.off { background:#b91c1c; }
+</style>
+</head>
+<body>
+<div class="conn" id="conn">연결 중...</div>
+<h1>🎬 꼬마 영화관</h1>
+<div class="sub">앉고 싶은 자리를 골라 보세요! (최대 30석)</div>
+<div class="screen">SCREEN</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="legend">
+  <span class="a">선택 가능</span><span class="m">내가 고른 자리</span>
+  <span class="o">다른 친구가 선택 중</span><span class="b">예매 완료</span>
+</div>
+
+<div class="panel">
+  <h2>🎟️ 결제하기</h2>
+  <div>고른 자리: <b id="mySeats">없음</b> &nbsp;|&nbsp; 금액: <b id="price">0</b>원</div>
+  <div class="row">
+    <input id="name" placeholder="이름을 써 주세요" maxlength="10">
+    <button class="btn pay" id="payBtn" disabled>결제하기</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>❌ 예매 취소</h2>
+  <div class="row">
+    <input id="code" placeholder="예매번호 4자리" maxlength="4" inputmode="numeric">
+    <button class="btn cancel" id="cancelBtn">취소하기</button>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+const PRICE = 1000;
+const ROWS = 5, COLS = 6;
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+let seats = [];          // 서버에서 받은 최신 좌석 상태
+let myId = null;         // 나의 연결 ID
+
+// ---------- 화면 그리기 ----------
+function render() {
+  grid.innerHTML = '';
+  for (let r = 0; r < ROWS; r++) {
+    const label = document.createElement('div');
+    label.className = 'rowlabel'; label.textContent = String.fromCharCode(65 + r);
+    grid.appendChild(label);
+    for (let c = 0; c < COLS; c++) {
+      const s = seats.find(x => x.row === r && x.col === c);
+      const btn = document.createElement('button');
+      btn.className = 'seat';
+      btn.textContent = c + 1;
+      if (!s) { btn.classList.add('available'); btn.disabled = true; }
+      else if (s.status === 'booked') { btn.classList.add('booked'); btn.disabled = true; }
+      else if (s.status === 'held' && s.holder === myId) { btn.classList.add('mine'); btn.onclick = () => release(s.id); }
+      else if (s.status === 'held') { btn.classList.add('other'); btn.disabled = true; }
+      else { btn.classList.add('available'); btn.onclick = () => hold(s.id); }
+      grid.appendChild(btn);
+    }
+  }
+  const mine = seats.filter(s => s.status === 'held' && s.holder === myId).map(s => s.id);
+  document.getElementById('mySeats').textContent = mine.length ? mine.join(', ') : '없음';
+  document.getElementById('price').textContent = (mine.length * PRICE).toLocaleString();
+  document.getElementById('payBtn').disabled = mine.length === 0;
+}
+function say(msg, ok = true) { statusEl.textContent = msg; statusEl.style.color = ok ? '#86efac' : '#fca5a5'; }
+
+// ---------- 서버 연결 (SignalR) ----------
+const conn = new signalR.HubConnectionBuilder()
+  .withUrl('/seathub')
+  .withAutomaticReconnect()
+  .build();
+
+conn.on('SeatsUpdated', list => { seats = list; render(); });
+conn.onreconnecting(() => setConn(false));
+conn.onreconnected(id => { myId = id; setConn(true); });
+conn.onclose(() => setConn(false));
+
+function setConn(on) {
+  const el = document.getElementById('conn');
+  el.textContent = on ? '● 실시간 연결됨' : '● 연결 끊김 (재연결 중)';
+  el.className = 'conn' + (on ? '' : ' off');
+}
+
+async function hold(id) {
+  const ok = await conn.invoke('HoldSeat', id);
+  if (!ok) say('앗! 다른 친구가 먼저 골랐어요. 다른 자리를 골라 보세요.', false);
+  else say(`${id} 자리를 골랐어요!`);
+}
+async function release(id) { await conn.invoke('ReleaseSeat', id); say(`${id} 자리 선택을 취소했어요.`); }
+
+document.getElementById('payBtn').onclick = async () => {
+  const name = document.getElementById('name').value;
+  const code = await conn.invoke('ConfirmBooking', name);
+  if (code) { say(`🎉 결제 완료! 예매번호는 [ ${code} ] 입니다. 꼭 기억해 두세요!`); document.getElementById('code').value = code; }
+  else say('먼저 자리를 골라 주세요.', false);
+};
+document.getElementById('cancelBtn').onclick = async () => {
+  const code = document.getElementById('code').value;
+  if (code.length !== 4) return say('예매번호 4자리를 입력해 주세요.', false);
+  const list = await conn.invoke('CancelBooking', code);
+  if (list) say(`${list.join(', ')} 자리 예매를 취소했어요. 이제 다른 친구가 앉을 수 있어요.`);
+  else say('그 예매번호는 없어요. 다시 확인해 주세요.', false);
+};
+
+render();
+conn.start().then(() => { myId = conn.connectionId; setConn(true); render(); })
+            .catch(e => { setConn(false); say('서버에 연결할 수 없어요: ' + e, false); });
+</script>
+</body>
+</html>

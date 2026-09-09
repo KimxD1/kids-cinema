@@ -1,0 +1,16 @@
+# Render.com 에서 "Blueprint" 로 이 파일을 읽어 자동 설정합니다.
+services:
+  - type: web
+    name: kids-cinema
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false        # 배포 시 Render 화면에서 직접 입력 (깃허브에 비밀번호를 올리지 않기 위해)
+      - key: DATA_DIR
+        value: /data
+    disk:                  # 서버 재시작 후에도 데이터가 남도록 하는 저장 공간 (Render 유료 기능 - 아래 README 참고)
+      name: cinema-data
+      mountPath: /data
+      sizeGB: 1
