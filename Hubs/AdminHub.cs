@@ -26,15 +26,23 @@ public class AdminHub(SeatStore store, IHubContext<SeatHub> seatHub, IConfigurat
     }
 
     // ---- 조회 ----
-    public Task<object> GetDashboard()
+    /// <summary>
+    /// sessionId 로 지정한 상영관의 대시보드를 반환한다.
+    /// sessionId 가 없거나 존재하지 않으면 서버가 알아서 첫 번째 상영관을 골라 그 id 를 currentSessionId 로 돌려준다.
+    /// </summary>
+    public Task<object> GetDashboard(string? sessionId)
     {
         RequireAdmin();
+        var sessions = store.ListSessions();
+        var resolvedId = sessions.Any(s => s.Id == sessionId) ? sessionId! : (sessions.FirstOrDefault()?.Id ?? "");
+
         return Task.FromResult<object>(new
         {
-            seats = store.Snapshot(),
-            bookings = store.AllBookings(),
-            siteOpen = store.SiteOpen,
-            show = store.Show
+            sessions,
+            currentSessionId = resolvedId,
+            seats = store.Snapshot(resolvedId),
+            bookings = store.AllBookings(resolvedId),
+            siteOpen = store.SiteOpen
         });
     }
 
@@ -43,49 +51,67 @@ public class AdminHub(SeatStore store, IHubContext<SeatHub> seatHub, IConfigurat
     public async Task<List<string>?> ForceCancel(string code)
     {
         RequireAdmin();
-        var seats = store.CancelBooking(code.Trim());
-        if (seats != null) await NotifyAll();
-        return seats;
+        var result = store.CancelBooking(code.Trim());
+        if (result != null) await NotifySeats(result.Value.sessionId);
+        return result?.seatIds;
     }
 
-    /// <summary>선택 중(노랑/빨강) 좌석 전부 해제</summary>
-    public async Task<int> ReleaseAllHolds()
+    /// <summary>지정한 상영관에서 선택 중(노랑/빨강) 좌석 전부 해제</summary>
+    public async Task<int> ReleaseAllHolds(string sessionId)
     {
         RequireAdmin();
-        var n = store.AdminReleaseAllHolds();
-        await NotifyAll();
+        var n = store.AdminReleaseAllHolds(sessionId);
+        await NotifySeats(sessionId);
         return n;
     }
 
-    /// <summary>모든 예매 삭제 + 좌석 초기화</summary>
-    public async Task ResetAll()
+    /// <summary>지정한 상영관의 예매를 전부 삭제하고 좌석을 초기화</summary>
+    public async Task ResetSession(string sessionId)
     {
         RequireAdmin();
-        store.AdminResetAll();
-        await NotifyAll();
+        store.AdminResetAll(sessionId);
+        await NotifySeats(sessionId);
     }
 
-    /// <summary>사이트 열기/닫기</summary>
+    /// <summary>사이트 열기/닫기 (모든 상영관에 공통 적용)</summary>
     public async Task SetSiteOpen(bool open)
     {
         RequireAdmin();
         store.AdminSetSiteOpen(open);
-        await NotifyAll();
+        await seatHub.Clients.All.SendAsync("SiteState", store.SiteOpen);
+        await Clients.All.SendAsync("AdminRefresh");
     }
 
-    /// <summary>영화 제목 / 상영시간 / 포스터 URL 설정 (비워도 됨)</summary>
-    public async Task SetShow(string title, string time, string posterUrl)
+    /// <summary>영화 세션(상영관) 추가 또는 수정. id 예: "cinema_1", "cinema_2"</summary>
+    public async Task<bool> AddOrUpdateSession(string id, string title, string startTime, string endTime)
     {
         RequireAdmin();
-        store.AdminSetShow(new ShowInfo(title?.Trim() ?? "", time?.Trim() ?? "", posterUrl?.Trim() ?? ""));
-        await NotifyAll();
+        var ok = store.AdminAddOrUpdateSession(id, title, startTime, endTime);
+        if (ok) await NotifySessions();
+        return ok;
     }
 
-    private async Task NotifyAll()
+    /// <summary>영화 세션 삭제 (예매가 남아있거나 마지막 하나 남은 세션이면 실패)</summary>
+    public async Task<bool> RemoveSession(string id)
     {
-        // 손님 화면 갱신
-        await seatHub.Clients.All.SendAsync("SeatsUpdated", store.Snapshot());
-        await seatHub.Clients.All.SendAsync("SiteState", store.SiteOpen, store.Show);
+        RequireAdmin();
+        var ok = store.AdminRemoveSession(id);
+        if (ok) await NotifySessions();
+        return ok;
+    }
+
+    private async Task NotifySeats(string sessionId)
+    {
+        // 손님 화면(그 세션을 보고 있는 사람) 갱신
+        await seatHub.Clients.Group(sessionId).SendAsync("SeatsUpdated", store.Snapshot(sessionId));
+        // 다른 관리자 화면 갱신
+        await Clients.All.SendAsync("AdminRefresh");
+    }
+
+    private async Task NotifySessions()
+    {
+        // 손님 화면의 "영화 선택" 목록 갱신
+        await seatHub.Clients.All.SendAsync("SessionsUpdated", store.ListSessions());
         // 다른 관리자 화면 갱신
         await Clients.All.SendAsync("AdminRefresh");
     }

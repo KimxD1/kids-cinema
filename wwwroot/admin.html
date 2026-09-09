@@ -11,7 +11,7 @@
   h1 { margin:0 0 16px; font-size:1.6rem; }
   .card { background:#1e293b; border-radius:14px; padding:18px; margin-bottom:16px; }
   .card h2 { margin:0 0 12px; font-size:1.05rem; color:#93c5fd; }
-  input { padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:.95rem; }
+  input, select { padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:.95rem; }
   button { padding:10px 14px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:.9rem; }
   .b1{background:#3b82f6;color:#fff} .b2{background:#f59e0b;color:#000} .b3{background:#ef4444;color:#fff} .b4{background:#10b981;color:#fff} .b5{background:#64748b;color:#fff}
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -27,6 +27,10 @@
   .open{background:#065f46} .closed{background:#7f1d1d}
   #login { max-width:380px; margin:80px auto; }
   #panel { display:none; }
+  .sessionRow input { width:100%; }
+  .sessionRow td { vertical-align:middle; }
+  .timeInput { width:110px; }
+  .idInput { width:110px; }
 </style>
 </head>
 <body>
@@ -45,7 +49,14 @@
     <h1>🎬 꼬마 영화관 관리자 <span class="badge" id="siteBadge"></span></h1>
 
     <div class="card">
-      <h2>현황</h2>
+      <h2>🎞 지금 보고 있는 상영관</h2>
+      <div class="row">
+        <select id="sessionSelect" style="flex:1"></select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>현황 (선택한 상영관 기준)</h2>
       <div class="stat">
         <div>예매 완료 <b id="cBooked">0</b></div>
         <div>선택 중 <b id="cHeld">0</b></div>
@@ -60,18 +71,25 @@
       <div class="row">
         <button class="b4" id="openBtn">사이트 열기</button>
         <button class="b2" id="closeBtn">사이트 닫기 (예매 중단)</button>
-        <button class="b5" id="releaseBtn">선택 중인 좌석 전부 해제</button>
-        <button class="b3" id="resetBtn">⚠ 전체 초기화 (모든 예매 삭제)</button>
+        <button class="b5" id="releaseBtn">선택한 상영관: 선택 중 좌석 전부 해제</button>
+        <button class="b3" id="resetBtn">⚠ 선택한 상영관 초기화 (예매 삭제)</button>
       </div>
+      <div style="margin-top:8px;font-size:.8rem;opacity:.7">* 사이트 열기/닫기는 모든 상영관에 공통 적용됩니다. 해제/초기화는 위에서 고른 상영관에만 적용됩니다.</div>
     </div>
 
     <div class="card">
-      <h2>영화 / 상영시간 (비워 두어도 됩니다)</h2>
-      <div class="row">
-        <input id="title" placeholder="영화 제목" style="flex:2">
-        <input id="time" placeholder="상영 시간 (예: 오후 2시)" style="flex:1">
-        <input id="poster" placeholder="포스터 이미지 주소(URL)" style="flex:2">
-        <button class="b1" id="showBtn">저장</button>
+      <h2>🎬 영화 상영관 관리 (영화 종류 추가)</h2>
+      <table>
+        <thead><tr><th>ID</th><th>영화 제목</th><th>시작</th><th>종료</th><th>예매수</th><th></th></tr></thead>
+        <tbody id="sessionTable"></tbody>
+      </table>
+      <div class="row" style="margin-top:14px">
+        <input class="idInput" id="newId" placeholder="ID (예: cinema_2)">
+        <input id="newTitle" placeholder="영화 제목" style="flex:1">
+        <input class="timeInput" id="newStart" type="time">
+        <span>~</span>
+        <input class="timeInput" id="newEnd" type="time">
+        <button class="b1" id="addSessionBtn">상영관 추가</button>
       </div>
     </div>
 
@@ -93,6 +111,7 @@ const conn = new signalR.HubConnectionBuilder().withUrl('/adminhub').withAutomat
 const $ = id => document.getElementById(id);
 const say = (m, ok = true) => { $('msg').textContent = m; $('msg').style.color = ok ? '#86efac' : '#fca5a5'; };
 let password = '';
+let currentSessionId = null;
 
 conn.on('AdminRefresh', refresh);
 conn.onreconnected(async () => { if (password) { await conn.invoke('Login', password); refresh(); } });
@@ -107,8 +126,11 @@ $('loginBtn').onclick = async () => {
 $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
 
 async function refresh() {
-  const d = await conn.invoke('GetDashboard');
+  const d = await conn.invoke('GetDashboard', currentSessionId);
+  currentSessionId = d.currentSessionId;
   const seats = d.seats;
+
+  // 현황
   $('cBooked').textContent = seats.filter(s => s.status === 'booked').length;
   $('cHeld').textContent = seats.filter(s => s.status === 'held').length;
   $('cAvail').textContent = seats.filter(s => s.status === 'available').length;
@@ -116,13 +138,55 @@ async function refresh() {
   $('grid').innerHTML = seats.map(s => `<div class="seat ${s.status}">${s.id}</div>`).join('');
   $('siteBadge').textContent = d.siteOpen ? '운영 중' : '닫힘';
   $('siteBadge').className = 'badge ' + (d.siteOpen ? 'open' : 'closed');
-  $('title').value = d.show.movieTitle; $('time').value = d.show.showTime; $('poster').value = d.show.posterUrl;
+
+  // 상영관 선택 드롭다운
+  $('sessionSelect').innerHTML = d.sessions.map(s =>
+    `<option value="${s.id}" ${s.id === currentSessionId ? 'selected' : ''}>${s.id} — ${s.movieTitle} (${s.startTime}~${s.endTime})</option>`
+  ).join('');
+
+  // 영화 상영관 관리 테이블
+  $('sessionTable').innerHTML = d.sessions.map(s => `
+    <tr class="sessionRow" data-id="${s.id}">
+      <td>${s.id}</td>
+      <td><input class="title" value="${s.movieTitle}"></td>
+      <td><input class="start timeInput" type="time" value="${s.startTime}"></td>
+      <td><input class="end timeInput" type="time" value="${s.endTime}"></td>
+      <td>${s.booked}</td>
+      <td class="row">
+        <button class="b1 saveBtn">저장</button>
+        <button class="b3 delBtn">삭제</button>
+      </td>
+    </tr>`).join('');
+
+  // 예매 목록
   $('bookings').innerHTML = d.bookings.length ? d.bookings.map(b =>
     `<tr><td><b>${b.code}</b></td><td>${b.name}</td><td>${b.seatIds.join(', ')}</td>
      <td>${new Date(b.createdAt).toLocaleString('ko-KR')}</td>
      <td><button class="b3" onclick="forceCancel('${b.code}')">취소</button></td></tr>`).join('')
     : '<tr><td colspan="5" style="opacity:.6">예매가 없습니다</td></tr>';
+
+  // 상영관 관리 테이블의 저장/삭제 버튼 연결
+  document.querySelectorAll('.sessionRow').forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelector('.saveBtn').onclick = async () => {
+      const title = tr.querySelector('.title').value;
+      const start = tr.querySelector('.start').value;
+      const end = tr.querySelector('.end').value;
+      await conn.invoke('AddOrUpdateSession', id, title, start, end);
+      say(`${id} 정보를 저장했습니다.`);
+      refresh();
+    };
+    tr.querySelector('.delBtn').onclick = async () => {
+      if (!confirm(`${id} 상영관을 삭제할까요? (예매가 있으면 삭제되지 않습니다)`)) return;
+      const ok = await conn.invoke('RemoveSession', id);
+      say(ok ? `${id} 상영관을 삭제했습니다.` : '삭제할 수 없습니다. (예매가 남아있거나 마지막 남은 상영관입니다)', ok);
+      if (ok && currentSessionId === id) currentSessionId = null;
+      refresh();
+    };
+  });
 }
+
+$('sessionSelect').onchange = () => { currentSessionId = $('sessionSelect').value; refresh(); };
 
 async function forceCancel(code) {
   if (!confirm(`예매번호 ${code} 를 취소할까요?`)) return;
@@ -132,12 +196,22 @@ async function forceCancel(code) {
 }
 $('openBtn').onclick = async () => { await conn.invoke('SetSiteOpen', true); say('사이트를 열었습니다.'); };
 $('closeBtn').onclick = async () => { await conn.invoke('SetSiteOpen', false); say('사이트를 닫았습니다. 원생들은 좌석을 선택할 수 없습니다.'); };
-$('releaseBtn').onclick = async () => { const n = await conn.invoke('ReleaseAllHolds'); say(`${n}개 좌석의 선택을 해제했습니다.`); };
+$('releaseBtn').onclick = async () => { const n = await conn.invoke('ReleaseAllHolds', currentSessionId); say(`${n}개 좌석의 선택을 해제했습니다.`); };
 $('resetBtn').onclick = async () => {
-  if (!confirm('모든 예매를 삭제하고 좌석을 처음 상태로 되돌립니다. 정말 진행할까요?')) return;
-  await conn.invoke('ResetAll'); say('전체 초기화 완료.');
+  if (!confirm(`${currentSessionId} 상영관의 모든 예매를 삭제하고 좌석을 처음 상태로 되돌립니다. 정말 진행할까요?`)) return;
+  await conn.invoke('ResetSession', currentSessionId); say('선택한 상영관을 초기화했습니다.');
 };
-$('showBtn').onclick = async () => { await conn.invoke('SetShow', $('title').value, $('time').value, $('poster').value); say('영화 정보를 저장했습니다.'); };
+$('addSessionBtn').onclick = async () => {
+  const id = $('newId').value.trim();
+  if (!id) return say('상영관 ID를 입력해 주세요. (예: cinema_2)', false);
+  const ok = await conn.invoke('AddOrUpdateSession', id, $('newTitle').value, $('newStart').value, $('newEnd').value);
+  if (ok) {
+    say(`${id} 상영관을 추가했습니다.`);
+    $('newId').value = ''; $('newTitle').value = ''; $('newStart').value = ''; $('newEnd').value = '';
+    currentSessionId = id;
+    refresh();
+  } else say('상영관을 추가하지 못했습니다.', false);
+};
 
 conn.start().catch(e => { $('loginMsg').textContent = '서버 연결 실패: ' + e; });
 </script>

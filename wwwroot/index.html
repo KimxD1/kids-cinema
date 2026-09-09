@@ -16,6 +16,7 @@
   .seat { aspect-ratio:1; border:none; border-radius:12px 12px 6px 6px; font-size:1rem; font-weight:bold; cursor:pointer; color:#1e1b4b; transition:transform .1s; position:relative; }
   .seat:active { transform:scale(.93); }
   .seat.available { background:var(--avail); }
+  .seat.available.limitreached { background:#166534; color:#bbf7d0; cursor:not-allowed; }
   .seat.mine { background:var(--mine); box-shadow:0 0 0 3px #fff inset; }
   .seat.other { background:var(--other); cursor:not-allowed; }
   .seat.booked { background:var(--booked); cursor:not-allowed; color:#374151; }
@@ -34,39 +35,78 @@
   #status { margin-top:14px; min-height:24px; font-weight:bold; text-align:center; }
   .conn { position:fixed; top:10px; right:12px; font-size:.75rem; padding:4px 10px; border-radius:999px; background:#0f766e; }
   .conn.off { background:#b91c1c; }
+
+  /* 좌상단 관리자 진입 버튼: BOX 50x50, radius 25 (원형) */
+  .admin-btn {
+    position:fixed; top:14px; left:14px; width:50px; height:50px; border-radius:25px;
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+    display:flex; align-items:center; justify-content:center; font-size:1.3rem;
+    cursor:pointer; z-index:100; text-decoration:none; color:#fff;
+  }
+  .admin-btn:active { transform:scale(.92); }
+
+  .closedBanner { background:#7f1d1d; color:#fecaca; padding:10px 16px; border-radius:10px; width:min(440px,92vw); text-align:center; font-weight:bold; margin-bottom:14px; display:none; }
+
+  /* 영화 세션(상영관) 선택 화면 */
+  #sessionSelect { width:min(440px,92vw); }
+  #sessionSelect h2 { text-align:center; margin-bottom:16px; }
+  .session-card { background:#312e81; border-radius:14px; padding:16px; margin-bottom:12px; cursor:pointer; border:2px solid transparent; }
+  .session-card:hover { border-color:#818cf8; }
+  .session-card.full { opacity:.5; cursor:not-allowed; }
+  .session-card .name { font-size:1.15rem; font-weight:bold; }
+  .session-card .time { opacity:.8; font-size:.9rem; margin-top:2px; }
+  .session-card .avail { margin-top:8px; font-size:.85rem; color:#a5b4fc; }
+  #bookingArea { display:none; width:100%; flex-direction:column; align-items:center; }
+  .backLink { background:none; border:none; color:#a5b4fc; text-decoration:underline; cursor:pointer; font-size:.9rem; margin-bottom:10px; }
 </style>
 </head>
 <body>
+<a class="admin-btn" href="admin.html" title="선생님 전용 관리자 페이지">🔒</a>
 <div class="conn" id="conn">연결 중...</div>
 <h1>🎬 꼬마 영화관</h1>
 <div class="sub">앉고 싶은 자리를 골라 보세요! (최대 30석)</div>
-<div class="screen">SCREEN</div>
 
-<div class="grid" id="grid"></div>
+<div class="closedBanner" id="closedBanner">😴 지금은 선생님이 예매를 잠시 쉬고 있어요.</div>
 
-<div class="legend">
-  <span class="a">선택 가능</span><span class="m">내가 고른 자리</span>
-  <span class="o">다른 친구가 선택 중</span><span class="b">예매 완료</span>
+<!-- 1단계: 어떤 영화를 볼지 고르기 -->
+<div id="sessionSelect">
+  <h2>보고 싶은 영화를 골라 보세요</h2>
+  <div id="sessionCards"></div>
 </div>
 
-<div class="panel">
-  <h2>🎟️ 결제하기</h2>
-  <div>고른 자리: <b id="mySeats">없음</b> &nbsp;|&nbsp; 금액: <b id="price">0</b>원</div>
-  <div class="row">
-    <input id="name" placeholder="이름을 써 주세요" maxlength="10">
-    <button class="btn pay" id="payBtn" disabled>결제하기</button>
+<!-- 2단계: 좌석 선택 + 결제/취소 -->
+<div id="bookingArea">
+  <button class="backLink" id="backBtn">← 다른 영화 고르기</button>
+  <h1 id="movieTitle">영화</h1>
+  <div class="sub" id="movieTime">00:00 ~ 00:00</div>
+  <div class="screen">SCREEN</div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="legend">
+    <span class="a">선택 가능</span><span class="m">내가 고른 자리</span>
+    <span class="o">다른 친구가 선택 중</span><span class="b">예매 완료</span>
   </div>
-</div>
 
-<div class="panel">
-  <h2>❌ 예매 취소</h2>
-  <div class="row">
-    <input id="code" placeholder="예매번호 4자리" maxlength="4" inputmode="numeric">
-    <button class="btn cancel" id="cancelBtn">취소하기</button>
+  <div class="panel">
+    <h2>🎟️ 결제하기 <span style="opacity:.7;font-weight:normal;font-size:.85rem">(한 사람당 최대 <span id="maxSeatsLabel">4</span>석)</span></h2>
+    <div>고른 자리: <b id="mySeats">없음</b> &nbsp;|&nbsp; 금액: <b id="price">0</b>원</div>
+    <div class="row">
+      <input id="name" placeholder="이름을 써 주세요" maxlength="10">
+      <button class="btn pay" id="payBtn" disabled>결제하기</button>
+    </div>
   </div>
-</div>
 
-<div id="status"></div>
+  <div class="panel">
+    <h2>❌ 예매 취소</h2>
+    <div class="row">
+      <input id="code" placeholder="예매번호 4자리" maxlength="4" inputmode="numeric">
+      <button class="btn cancel" id="cancelBtn">취소하기</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
 <script>
@@ -74,12 +114,54 @@ const PRICE = 1000;
 const ROWS = 5, COLS = 6;
 const grid = document.getElementById('grid');
 const statusEl = document.getElementById('status');
-let seats = [];          // 서버에서 받은 최신 좌석 상태
+let seats = [];          // 서버에서 받은 최신 좌석 상태 (현재 고른 세션 기준)
 let myId = null;         // 나의 연결 ID
+let sessionsList = [];   // 영화 세션(상영관) 목록
+let currentSessionId = null;
+let MAX_SEATS = 4;       // 서버에서 GetMaxHold() 로 다시 확인함
 
-// ---------- 화면 그리기 ----------
+function say(msg, ok = true) { statusEl.textContent = msg; statusEl.style.color = ok ? '#86efac' : '#fca5a5'; }
+
+// ---------- 1단계: 영화 세션 선택 화면 ----------
+function renderSessionCards() {
+  const el = document.getElementById('sessionCards');
+  if (sessionsList.length === 0) { el.innerHTML = '<div style="opacity:.7;text-align:center">아직 등록된 영화가 없어요. 선생님을 기다려 주세요!</div>'; return; }
+  el.innerHTML = sessionsList.map(s => {
+    const full = s.available === 0;
+    return `<div class="session-card ${full ? 'full' : ''}" data-id="${s.id}">
+      <div class="name">🎬 ${s.movieTitle}</div>
+      <div class="time">⏰ ${s.startTime} ~ ${s.endTime}</div>
+      <div class="avail">${full ? '자리가 모두 찼어요' : `남은 자리: ${s.available}석`}</div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.session-card:not(.full)').forEach(card => {
+    card.onclick = () => chooseSession(card.dataset.id);
+  });
+}
+
+async function chooseSession(id) {
+  currentSessionId = id;
+  seats = await conn.invoke('SelectSession', id);
+  const info = sessionsList.find(s => s.id === id);
+  document.getElementById('movieTitle').textContent = info ? `🎬 ${info.movieTitle}` : id;
+  document.getElementById('movieTime').textContent = info ? `⏰ ${info.startTime} ~ ${info.endTime}` : '';
+  document.getElementById('sessionSelect').style.display = 'none';
+  document.getElementById('bookingArea').style.display = 'flex';
+  render();
+}
+
+document.getElementById('backBtn').onclick = () => {
+  document.getElementById('bookingArea').style.display = 'none';
+  document.getElementById('sessionSelect').style.display = 'block';
+  renderSessionCards();
+};
+
+// ---------- 2단계: 좌석 화면 그리기 ----------
 function render() {
   grid.innerHTML = '';
+  const mineCount = seats.filter(s => s.status === 'held' && s.holder === myId).length;
+  const limitReached = mineCount >= MAX_SEATS;
+
   for (let r = 0; r < ROWS; r++) {
     const label = document.createElement('div');
     label.className = 'rowlabel'; label.textContent = String.fromCharCode(65 + r);
@@ -93,6 +175,7 @@ function render() {
       else if (s.status === 'booked') { btn.classList.add('booked'); btn.disabled = true; }
       else if (s.status === 'held' && s.holder === myId) { btn.classList.add('mine'); btn.onclick = () => release(s.id); }
       else if (s.status === 'held') { btn.classList.add('other'); btn.disabled = true; }
+      else if (limitReached) { btn.classList.add('available', 'limitreached'); btn.disabled = true; }
       else { btn.classList.add('available'); btn.onclick = () => hold(s.id); }
       grid.appendChild(btn);
     }
@@ -102,7 +185,6 @@ function render() {
   document.getElementById('price').textContent = (mine.length * PRICE).toLocaleString();
   document.getElementById('payBtn').disabled = mine.length === 0;
 }
-function say(msg, ok = true) { statusEl.textContent = msg; statusEl.style.color = ok ? '#86efac' : '#fca5a5'; }
 
 // ---------- 서버 연결 (SignalR) ----------
 const conn = new signalR.HubConnectionBuilder()
@@ -110,9 +192,19 @@ const conn = new signalR.HubConnectionBuilder()
   .withAutomaticReconnect()
   .build();
 
-conn.on('SeatsUpdated', list => { seats = list; render(); });
+conn.on('SeatsUpdated', list => { seats = list; if (document.getElementById('bookingArea').style.display !== 'none') render(); });
+conn.on('SessionsUpdated', list => {
+  sessionsList = list;
+  if (document.getElementById('sessionSelect').style.display !== 'none') renderSessionCards();
+});
+conn.on('SiteState', open => {
+  document.getElementById('closedBanner').style.display = open ? 'none' : 'block';
+});
 conn.onreconnecting(() => setConn(false));
-conn.onreconnected(id => { myId = id; setConn(true); });
+conn.onreconnected(async id => {
+  myId = id; setConn(true);
+  if (currentSessionId) { seats = await conn.invoke('SelectSession', currentSessionId); render(); }
+});
 conn.onclose(() => setConn(false));
 
 function setConn(on) {
@@ -122,15 +214,19 @@ function setConn(on) {
 }
 
 async function hold(id) {
-  const ok = await conn.invoke('HoldSeat', id);
-  if (!ok) say('앗! 다른 친구가 먼저 골랐어요. 다른 자리를 골라 보세요.', false);
+  const ok = await conn.invoke('HoldSeat', currentSessionId, id);
+  if (!ok) {
+    const mineCount = seats.filter(s => s.status === 'held' && s.holder === myId).length;
+    if (mineCount >= MAX_SEATS) say(`한 사람당 최대 ${MAX_SEATS}석까지만 고를 수 있어요!`, false);
+    else say('앗! 다른 친구가 먼저 골랐어요. 다른 자리를 골라 보세요.', false);
+  }
   else say(`${id} 자리를 골랐어요!`);
 }
-async function release(id) { await conn.invoke('ReleaseSeat', id); say(`${id} 자리 선택을 취소했어요.`); }
+async function release(id) { await conn.invoke('ReleaseSeat', currentSessionId, id); say(`${id} 자리 선택을 취소했어요.`); }
 
 document.getElementById('payBtn').onclick = async () => {
   const name = document.getElementById('name').value;
-  const code = await conn.invoke('ConfirmBooking', name);
+  const code = await conn.invoke('ConfirmBooking', currentSessionId, name);
   if (code) { say(`🎉 결제 완료! 예매번호는 [ ${code} ] 입니다. 꼭 기억해 두세요!`); document.getElementById('code').value = code; }
   else say('먼저 자리를 골라 주세요.', false);
 };
@@ -142,9 +238,10 @@ document.getElementById('cancelBtn').onclick = async () => {
   else say('그 예매번호는 없어요. 다시 확인해 주세요.', false);
 };
 
-render();
-conn.start().then(() => { myId = conn.connectionId; setConn(true); render(); })
-            .catch(e => { setConn(false); say('서버에 연결할 수 없어요: ' + e, false); });
+conn.start().then(async () => {
+  myId = conn.connectionId; setConn(true);
+  try { MAX_SEATS = await conn.invoke('GetMaxHold'); document.getElementById('maxSeatsLabel').textContent = MAX_SEATS; } catch {}
+}).catch(e => { setConn(false); say('서버에 연결할 수 없어요: ' + e, false); });
 </script>
 </body>
 </html>
